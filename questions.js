@@ -5,8 +5,8 @@
 
   const DRILLS = Object.freeze({
     mental: { name: '80 in 8 Mental Math', count: 80, durationSeconds: 480, correct: 1, incorrect: -1 },
-    sequences: { name: 'Timed Sequences', count: 20, durationSeconds: 600, correct: 1, incorrect: -1 / 3 },
-    probability: { name: 'Timed Probability & EV', count: 15, durationSeconds: 900, correct: 1, incorrect: -1 / 3 }
+    sequences: { name: 'Timed Sequences', count: 20, durationSeconds: 600, correct: 1, incorrect: -1 },
+    probability: { name: 'Timed Probability & EV', count: 15, durationSeconds: 900, correct: 1, incorrect: -1 }
   });
 
   const MENTAL_SUBTYPES = Object.freeze({
