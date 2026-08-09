@@ -43,43 +43,6 @@ cd quant-oa-trainer
 
 Then open `index.html` directly. The application uses ordinary deferred script tags rather than module imports, so it works from the local filesystem.
 
-## Development validation
-
-Open the browser developer console and run:
-
-```javascript
-QuantQuestions.validateGenerators(1000)
-```
-
-This generates at least 1,000 questions from each major generator and checks question structure, mathematical values, distractor uniqueness, sequence metadata, probability bounds, negative marking, median calculations, timestamp timer calculations, equivalent typed answers, and duplicate-submission protection.
-
-
-## Push to GitHub
-
-```bash
-git init
-git add .
-git commit -m "Initial Quant OA Trainer release"
-git branch -M main
-git remote add origin REPOSITORY_URL
-git push -u origin main
-```
-
-Replace `REPOSITORY_URL` with the URL of the repository you create on GitHub.
-
-## GitHub Pages deployment
-
-1. Push the repository to GitHub.
-2. Open the repository's **Settings**.
-3. Open **Pages**.
-4. Select deployment from a branch.
-5. Select the `main` branch.
-6. Select the repository root.
-7. Save.
-8. Open the generated GitHub Pages URL.
-
-The same static files can also be hosted on another service that serves ordinary HTML, CSS, and JavaScript files.
-
 ## Privacy
 
 - Timed attempt data is stored in browser `localStorage`.
