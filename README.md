@@ -7,8 +7,8 @@ The application uses plain HTML, CSS, vanilla JavaScript, and browser `localStor
 ## Main modes
 
 - **80 in 8 Mental Math** — 80 multiple-choice questions in 8 minutes, scored +1 correct and −1 incorrect.
-- **Timed Sequences** — 20 procedural sequence questions in 10 minutes, scored +1 correct and −1/3 incorrect.
-- **Timed Probability & EV** — 15 structured probability and expected-value questions in 15 minutes, scored +1 correct and −1/3 incorrect.
+- **Timed Sequences** — 20 procedural sequence questions in 10 minutes, scored +1 correct and −1 incorrect.
+- **Timed Probability & EV** — 15 structured probability and expected-value questions in 15 minutes, scored +1 correct and −1 incorrect.
 - **Untimed Mixed Practice** — unlimited practice drawn equally from the three major categories, with immediate feedback and no score.
 
 ## Features
