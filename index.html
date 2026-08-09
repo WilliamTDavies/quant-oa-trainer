@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Static browser-based practice for mental math, numerical sequences, probability, and expected value.">
+  <title>Quant OA Trainer</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="questions.js"></script>
+  <script defer src="storage.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <header class="site-header" id="site-header">
+    <div class="shell header-inner">
+      <button class="brand-button" id="brand-home" type="button" aria-label="Return to home">Quant OA Trainer</button>
+      <p class="header-tagline">Focused practice for quantitative online assessments</p>
+    </div>
+  </header>
+
+  <main id="main-content" tabindex="-1">
+    <section class="screen active" id="home-screen" aria-labelledby="home-title">
+      <div class="shell home-shell">
+        <div class="home-heading">
+          <p class="eyebrow">Static. Private. Keyboard-first.</p>
+          <h1 id="home-title" tabindex="-1">Quant OA Trainer</h1>
+          <p class="lede">Mental math, sequences, probability, and expected value under realistic time pressure.</p>
+        </div>
+
+        <div class="mode-grid" aria-label="Training modes">
+          <button class="mode-card" type="button" data-start-drill="mental">
+            <span class="mode-title">80 in 8 Mental Math</span>
+            <span class="mode-meta">80 questions · 8 minutes · +1 / −1</span>
+          </button>
+          <button class="mode-card" type="button" data-start-drill="sequences">
+            <span class="mode-title">Timed Sequences</span>
+            <span class="mode-meta">20 questions · 10 minutes · +1 / −⅓</span>
+          </button>
+          <button class="mode-card" type="button" data-start-drill="probability">
+            <span class="mode-title">Timed Probability &amp; EV</span>
+            <span class="mode-meta">15 questions · 15 minutes · +1 / −⅓</span>
+          </button>
+          <button class="mode-card practice-card" type="button" id="start-practice">
+            <span class="mode-title">Untimed Mixed Practice</span>
+            <span class="mode-meta">Unlimited · immediate feedback · no scoring</span>
+          </button>
+        </div>
+
+        <section class="panel" aria-labelledby="summary-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Local record</p>
+              <h2 id="summary-title">Timed-drill summary</h2>
+            </div>
+            <div class="history-actions">
+              <button class="secondary-button" id="export-history" type="button">Export JSON</button>
+              <button class="danger-button" id="clear-history" type="button">Clear history</button>
+            </div>
+          </div>
+          <p class="empty-state" id="history-empty">Complete your first drill to begin tracking results.</p>
+          <div class="summary-grid" id="summary-grid" hidden></div>
+          <p class="privacy-note">Your progress is stored locally in this browser. No attempt data is transmitted.</p>
+        </section>
+
+        <section class="panel" aria-labelledby="recent-title">
+          <div class="panel-heading compact">
+            <h2 id="recent-title">Recent attempts</h2>
+          </div>
+          <div id="recent-attempts" class="attempt-list">
+            <p class="muted">No attempts saved.</p>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="screen drill-screen" id="drill-screen" aria-labelledby="drill-title" hidden>
+      <div class="drill-shell">
+        <div class="drill-status" aria-live="polite">
+          <div class="timer-value" id="overall-timer">Time left: 00:00</div>
+          <div class="timer-value" id="question-timer">Question time: 0.0s</div>
+          <div class="question-counter" id="question-counter">Question 1 / 1</div>
+        </div>
+        <div class="progress-track" aria-hidden="true"><div class="progress-bar" id="drill-progress"></div></div>
+        <article class="question-stage">
+          <p class="sr-only" id="drill-title">Timed drill</p>
+          <div class="question-prompt" id="drill-prompt"></div>
+          <div class="answer-grid" id="drill-options" role="group" aria-label="Answer choices"></div>
+          <button class="skip-button" id="skip-question" type="button">Skip <span aria-hidden="true">(Esc)</span></button>
+        </article>
+      </div>
+    </section>
+
+    <section class="screen" id="results-screen" aria-labelledby="results-title" hidden>
+      <div class="shell results-shell">
+        <div class="section-heading">
+          <p class="eyebrow">Completed attempt</p>
+          <h1 id="results-title" tabindex="-1">Results</h1>
+        </div>
+        <div class="result-cards" id="result-cards"></div>
+
+        <section class="panel" aria-labelledby="subtype-title">
+          <h2 id="subtype-title">Performance by subtype</h2>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th scope="col">Subtype</th><th scope="col">Correct</th><th scope="col">Attempted</th><th scope="col">Total</th></tr></thead><tbody id="subtype-results"></tbody></table></div>
+        </section>
+
+        <section class="panel" aria-labelledby="previous-title">
+          <h2 id="previous-title">Recent previous attempts</h2>
+          <div id="previous-attempts" class="attempt-list"></div>
+        </section>
+
+        <div class="button-row">
+          <button class="primary-button" id="review-mistakes" type="button">Review mistakes</button>
+          <button class="secondary-button" id="review-all" type="button">Review all questions</button>
+          <button class="secondary-button" id="repeat-drill" type="button">Repeat drill</button>
+          <button class="text-button" id="results-home" type="button">Return home</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="screen" id="review-screen" aria-labelledby="review-title" hidden>
+      <div class="shell review-shell">
+        <div class="section-heading review-heading">
+          <div>
+            <p class="eyebrow">Attempt review</p>
+            <h1 id="review-title" tabindex="-1">Question review</h1>
+          </div>
+          <button class="secondary-button" id="review-back" type="button">Back to results</button>
+        </div>
+        <div id="review-list" class="review-list"></div>
+      </div>
+    </section>
+
+    <section class="screen practice-screen" id="practice-screen" aria-labelledby="practice-title" hidden>
+      <div class="practice-shell">
+        <div class="practice-topbar">
+          <div>
+            <p class="eyebrow">Untimed Mixed Practice</p>
+            <h1 id="practice-title" tabindex="-1">Practice question</h1>
+          </div>
+          <button class="text-button" id="end-practice" type="button">End Practice</button>
+        </div>
+        <div class="practice-meta">
+          <span id="practice-category">Mental Math</span>
+          <span class="timer-value" id="practice-timer">Question time: 0.0s</span>
+        </div>
+        <article class="practice-stage">
+          <div class="question-prompt" id="practice-prompt"></div>
+          <form id="practice-form" class="typed-answer-form" hidden>
+            <label for="practice-input">Your answer</label>
+            <div class="input-row">
+              <input id="practice-input" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
+              <button class="primary-button" type="submit">Check answer</button>
+            </div>
+          </form>
+          <div class="answer-grid" id="practice-options" role="group" aria-label="Answer choices" hidden></div>
+          <div class="feedback-panel" id="practice-feedback" tabindex="-1" hidden></div>
+          <button class="primary-button" id="next-practice" type="button" hidden>Next Question</button>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer" id="site-footer">
+    <div class="shell footer-inner">
+      <strong>Quant OA Trainer</strong>
+      <span>Independent practice tool. Not affiliated with or endorsed by any quantitative trading firm or assessment provider.</span>
+      <span>Progress is stored locally in your browser.</span>
+    </div>
+  </footer>
+
+  <div class="modal-backdrop" id="confirm-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+      <h2 id="confirm-title">Clear local history?</h2>
+      <p id="confirm-text">This permanently removes all saved timed attempts from this browser.</p>
+      <div class="button-row">
+        <button class="danger-button" id="confirm-clear" type="button">Clear history</button>
+        <button class="secondary-button" id="cancel-clear" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <noscript><div class="noscript">Quant OA Trainer requires JavaScript enabled in the browser.</div></noscript>
+</body>
+</html>
