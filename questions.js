@@ -58,6 +58,16 @@
     return copy;
   }
 
+  function sampleDistinct(items, count) {
+    if (!Array.isArray(items) || count < 0 || count > items.length) throw new Error('Invalid distinct sample');
+    return shuffle(items).slice(0, count);
+  }
+
+  function questionUniquenessKey(question) {
+    const raw = question && question.dedupeKey ? question.dedupeKey : question.prompt;
+    return String(raw || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
   function weightedChoice(entries) {
     const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
     let roll = Math.random() * total;
@@ -268,7 +278,8 @@
       fasterMethod: config.fasterMethod || '',
       method: config.method || '',
       assumptions: config.assumptions || '',
-      templateId: config.templateId
+      templateId: config.templateId,
+      dedupeKey: config.dedupeKey || ''
     };
   }
 
@@ -444,7 +455,8 @@
       // general distractor builder usually adds same-units-digit carry errors first,
       // while leaving a minority of questions where a last-digit check is useful.
       distractors: [rational(product + a, 1), rational(product - a, 1), rational(product + b, 1), rational(product - b, 1)],
-      explanation: `${a} × ${b} = ${product}.`, fasterMethod, templateId
+      explanation: `${a} × ${b} = ${product}.`, fasterMethod, templateId,
+      dedupeKey: `mental:multiplication:${Math.min(a, b)}x${Math.max(a, b)}`
     });
   }
 
@@ -544,7 +556,10 @@
         prompt: `${formatRational(a, 'fraction')} ${op} ${formatRational(b, 'fraction')}`, correct: result, style: 'fraction',
         distractors: [rational(op === '+' ? a.num + b.num : a.num - b.num, a.den + b.den), rational(result.num + 1, result.den), rational(result.num, result.den + 1)],
         explanation: `Use a common denominator of ${lcm(a.den, b.den)}. The result simplifies to ${formatRational(result, 'fraction')}.`,
-        fasterMethod: a.den === b.den ? 'The denominators already match; combine the numerators.' : 'Cross-scale to the lowest common denominator.', templateId: 'fraction-arithmetic'
+        fasterMethod: a.den === b.den ? 'The denominators already match; combine the numerators.' : 'Cross-scale to the lowest common denominator.', templateId: 'fraction-arithmetic',
+        dedupeKey: op === '+'
+          ? `mental:fraction-add:${[`${a.num}/${a.den}`, `${b.num}/${b.den}`].sort().join('|')}`
+          : `mental:fraction-sub:${a.num}/${a.den}|${b.num}/${b.den}`
       });
     }
     if (template === 5) {
@@ -559,11 +574,12 @@
         prompt: `Which is larger: ${formatRational(a, 'fraction')} or ${formatRational(b, 'fraction')}?`, options: options.options, correctIndex: options.correctIndex,
         correctAnswer, correctValue: bigger, answerStyle: 'fraction', allowPercent: false,
         explanation: `Cross-multiply: compare ${a.num} × ${b.den} = ${a.num * b.den} with ${b.num} × ${a.den} = ${b.num * a.den}. Therefore ${correctAnswer} is larger.`,
-        fasterMethod: 'Cross-multiply; there is no need to calculate either decimal.', method: '', assumptions: '', templateId: 'compare-fractions'
+        fasterMethod: 'Cross-multiply; there is no need to calculate either decimal.', method: '', assumptions: '', templateId: 'compare-fractions',
+        dedupeKey: `mental:compare-fractions:${[`${a.num}/${a.den}`, `${b.num}/${b.den}`].sort().join('|')}`
       };
     }
     if (template === 6) {
-      const percent = choice([12.5, 20, 25, 37.5, 40, 50, 62.5, 75, 80]);
+      const percent = choice([5, 6.25, 8, 10, 12.5, 15, 16, 20, 22.5, 25, 30, 32, 35, 37.5, 40, 45, 50, 55, 60, 62.5, 65, 70, 75, 80, 85, 87.5, 90, 92.5, 95]);
       const r = rational(Math.round(percent * 10), 1000);
       return makeNumericQuestion({
         category: 'mental', subtype: 'fractions', subtypeLabel: MENTAL_SUBTYPES.fractions,
@@ -574,11 +590,29 @@
       });
     }
 
-    const chosen = shuffle([
-      { r: rational(1, 2), label: '1/2' },
-      { r: rational(3, 5), label: '3/5' },
-      { r: rational(5, 8), label: '5/8' }
-    ]);
+    // Build the ordering problem from a broad pool of reduced proper fractions rather
+    // than recycling one fixed triple. Fractions that are extremely close together
+    // are rejected so the task remains quick numerical comparison rather than trivia.
+    const fractionPool = [];
+    const seenFractions = new Set();
+    for (let denominator = 2; denominator <= 12; denominator += 1) {
+      for (let numerator = 1; numerator < denominator; numerator += 1) {
+        const r = rational(numerator, denominator);
+        const key = `${r.num}/${r.den}`;
+        if (!seenFractions.has(key)) {
+          seenFractions.add(key);
+          fractionPool.push({ r, label: formatRational(r, 'fraction') });
+        }
+      }
+    }
+    let selected = null;
+    for (let attempt = 0; attempt < 100 && !selected; attempt += 1) {
+      const candidate = sampleDistinct(fractionPool, 3);
+      const values = candidate.map((item) => toNumber(item.r)).sort((a, b) => a - b);
+      if (values[1] - values[0] >= 0.035 && values[2] - values[1] >= 0.035) selected = candidate;
+    }
+    if (!selected) return fractionDecimalQuestion();
+    const chosen = shuffle(selected);
     const sorted = chosen.slice().sort((x, y) => toNumber(x.r) - toNumber(y.r));
     const correctAnswer = sorted.map((item) => item.label).join(' < ');
     const orders = [
@@ -586,33 +620,35 @@
       [1, 2, 0], [2, 0, 1], [2, 1, 0]
     ].map((order) => order.map((index) => chosen[index].label).join(' < '));
     const mc = makeOptions(correctAnswer, orders.filter((value) => value !== correctAnswer));
+    const canonicalSet = sorted.map((item) => `${item.r.num}/${item.r.den}`).join('|');
     return {
       id: uid('mental'), category: 'mental', subtype: 'fractions', subtypeLabel: MENTAL_SUBTYPES.fractions,
       prompt: `Order from smallest to largest: ${chosen.map((x) => x.label).join(', ')}`, options: mc.options, correctIndex: mc.correctIndex,
       correctAnswer, correctValue: sorted[0].r, answerStyle: 'text', allowPercent: false,
       explanation: `Convert to comparable decimals: ${chosen.map((x) => `${x.label} = ${trimDecimal(toNumber(x.r), 3)}`).join(', ')}.`,
-      fasterMethod: 'Convert each value to a familiar decimal or percentage.', method: '', assumptions: '', templateId: 'order-equivalent-values'
+      fasterMethod: 'Convert each value to a familiar decimal or percentage.', method: '', assumptions: '', templateId: 'order-equivalent-values',
+      dedupeKey: `mental:order-fractions:${canonicalSet}`
     };
   }
 
   function percentageQuestion() {
     const template = randomInt(1, 7);
     if (template <= 2) {
-      const percent = choice([5, 10, 12.5, 15, 20, 25, 30, 35, 40, 45, 60, 75]);
-      const base = choice([80, 120, 160, 200, 240, 250, 300, 320, 340, 400, 480, 600]);
+      const percent = choice([5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 30, 32.5, 35, 37.5, 40, 45, 50, 60, 62.5, 70, 75]);
+      const base = choice([64, 72, 80, 96, 120, 144, 160, 180, 200, 224, 240, 250, 280, 300, 320, 340, 360, 400, 450, 480, 500, 600, 640, 800]);
       const result = rational(Math.round(percent * 10) * base, 1000);
       return makeNumericQuestion({
         category: 'mental', subtype: 'percentages', subtypeLabel: MENTAL_SUBTYPES.percentages,
         prompt: `${percent}% of ${base}`, correct: result, style: 'auto', allowPercent: false,
-        distractors: [rational(Math.round(percent * 10) * base, 100), rational(Math.round(percent * 10) + base, 10), addR(result, rational(base / 10, 1))],
+        distractors: [rational(Math.round(percent * 10) * base, 100), rational(Math.round(percent * 10) + base, 10), addR(result, rational(base, 10))],
         explanation: `${percent}% of ${base} = ${percent / 100} × ${base} = ${formatRational(result, 'auto')}.`,
         fasterMethod: percent === 15 ? 'Find 10% and 5%, then add.' : percent === 12.5 ? '12.5% is one eighth.' : 'Break the percentage into familiar parts.',
         templateId: 'percentage-of-number'
       });
     }
     if (template === 3) {
-      const percent = choice([10, 15, 20, 25, 30, 40]);
-      const original = choice([80, 100, 120, 160, 200, 240, 300, 400]);
+      const percent = choice([5, 10, 15, 20, 25, 30, 35, 40, 45, 50]);
+      const original = choice([64, 80, 96, 100, 120, 144, 160, 180, 200, 240, 280, 300, 320, 360, 400, 480]);
       const increase = Math.random() < 0.5;
       const multiplier = increase ? rational(100 + percent, 100) : rational(100 - percent, 100);
       const result = mulR(rational(original, 1), multiplier);
@@ -625,8 +661,8 @@
       });
     }
     if (template === 4) {
-      const percent = choice([20, 25, 40, 50]);
-      const original = choice([80, 100, 120, 160, 200, 240]);
+      const percent = choice([10, 20, 25, 40, 50, 60]);
+      const original = choice([60, 80, 100, 120, 140, 160, 180, 200, 240, 280, 300, 320, 360, 400, 480, 600]);
       const final = original * (100 + percent) / 100;
       return makeNumericQuestion({
         category: 'mental', subtype: 'percentages', subtypeLabel: MENTAL_SUBTYPES.percentages,
@@ -637,7 +673,7 @@
       });
     }
     if (template === 5) {
-      const p = choice([10, 20, 25, 30]);
+      const p = choice([5, 10, 15, 20, 25, 30, 35, 40, 45, 50]);
       const net = rational(-p * p, 10000);
       return makeNumericQuestion({
         category: 'mental', subtype: 'percentages', subtypeLabel: MENTAL_SUBTYPES.percentages,
@@ -648,8 +684,8 @@
       });
     }
     if (template === 6) {
-      const before = choice([20, 25, 30, 35, 40, 45]);
-      const after = before + choice([5, 10, 15, 20]);
+      const before = choice([10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]);
+      const after = before + choice([3, 5, 7, 10, 12, 15, 20]);
       const diff = rational(after - before, 1);
       return makeNumericQuestion({
         category: 'mental', subtype: 'percentages', subtypeLabel: MENTAL_SUBTYPES.percentages,
@@ -659,8 +695,8 @@
         fasterMethod: 'Percentage points are the direct difference between the two rates.', templateId: 'percentage-points'
       });
     }
-    const cost = choice([40, 50, 80, 100, 120, 160]);
-    const profitPercent = choice([10, 20, 25, 30, 40]);
+    const cost = choice([30, 40, 48, 50, 60, 72, 80, 90, 100, 120, 144, 150, 160, 200, 240]);
+    const profitPercent = choice([5, 10, 15, 20, 25, 30, 35, 40, 45, 50]);
     const selling = cost * (100 + profitPercent) / 100;
     return makeNumericQuestion({
       category: 'mental', subtype: 'percentages', subtypeLabel: MENTAL_SUBTYPES.percentages,
@@ -688,7 +724,7 @@
     if (template === 4) {
       // e.g. ? / 0.05 = 720000
       const divisor = choice([rational(1, 20), rational(1, 10), rational(1, 8), rational(1, 5), rational(1, 4)]);
-      const x = rational(choice([12000, 18000, 24000, 30000, 36000, 42000, 48000, 60000, 72000]), 1);
+      const x = rational(randomInt(12, 96) * 1000, 1);
       const result = divR(x, divisor);
       const divisorText = formatRational(divisor, 'decimal');
       return makeNumericQuestion({
@@ -711,8 +747,8 @@
         fasterMethod: 'Align the decimal places and subtract to isolate the missing value.', templateId: 'missing-decimal-addition'
       });
     }
-    const percent = choice([12.5, 20, 25, 40, 50, 75]);
-    const x = choice([120, 160, 200, 240, 320, 400, 480, 600, 800]);
+    const percent = choice([5, 10, 12.5, 15, 20, 25, 30, 37.5, 40, 50, 60, 62.5, 75, 80]);
+    const x = choice([80, 96, 120, 144, 160, 180, 200, 224, 240, 280, 300, 320, 360, 400, 480, 500, 600, 640, 720, 800, 960]);
     const percentR = rational(Math.round(percent * 10), 1000);
     const result = mulR(rational(x, 1), percentR);
     return makeNumericQuestion({ category: 'mental', subtype: 'missing', subtypeLabel: MENTAL_SUBTYPES.missing, prompt: `${percent}% of ? = ${formatRational(result, 'auto')}`, correct: rational(x, 1), style: 'auto', distractors: [rational(x + 10, 1), rational(x - 10, 1), mulR(result, percentR)], explanation: `${formatRational(result, 'auto')} ÷ ${percent / 100} = ${x}.`, fasterMethod: `Scale from ${percent}% back to 100%.`, templateId: 'missing-percentage' });
@@ -772,16 +808,18 @@
   }
 
   function ratioSequence() {
-    const ratio = choice([2, 3, 4, rational(3, 2)]);
+    const ratio = choice([2, 3, 4, 5, rational(3, 2), rational(4, 3)]);
     let start;
     let terms;
     let next;
     if (typeof ratio === 'number') {
-      start = randomInt(1, 8);
+      const maxStart = ratio === 5 ? 4 : ratio === 4 ? 12 : 18;
+      start = randomInt(1, maxStart);
       terms = Array.from({ length: 6 }, (_, i) => start * ratio ** i);
       next = start * ratio ** 6;
     } else {
-      start = choice([64, 128]);
+      if (ratio.num === 3) start = 64 * randomInt(1, 5);
+      else start = 729 * randomInt(1, 3);
       terms = [start];
       for (let i = 1; i < 6; i += 1) terms.push(terms[i - 1] * ratio.num / ratio.den);
       next = terms[5] * ratio.num / ratio.den;
@@ -850,30 +888,30 @@
     let rule;
     let templateId;
     if (template === 1) {
-      const start = randomInt(1, 5);
+      const start = randomInt(1, 8);
       terms = Array.from({ length: 6 }, (_, i) => (start + i) ** 2); next = (start + 6) ** 2;
       explanation = `These are consecutive squares from ${start}² to ${start + 5}². The next is ${start + 6}² = ${next}.`;
       rule = { type: 'squares', start }; templateId = 'seq-squares';
     } else if (template === 2) {
-      const start = randomInt(1, 3);
+      const start = randomInt(1, 5);
       terms = Array.from({ length: 5 }, (_, i) => (start + i) ** 3); next = (start + 5) ** 3;
       explanation = `These are consecutive cubes. The next is ${start + 5}³ = ${next}.`;
       rule = { type: 'cubes', start }; templateId = 'seq-cubes';
     } else if (template === 3) {
-      const start = randomInt(1, 4);
+      const start = randomInt(1, 10);
       const triangle = (n) => n * (n + 1) / 2;
       terms = Array.from({ length: 6 }, (_, i) => triangle(start + i)); next = triangle(start + 6);
       explanation = `These are triangular numbers; the successive additions are ${start + 1}, ${start + 2}, and so on. The next term is ${next}.`;
       rule = { type: 'triangular', start }; templateId = 'seq-triangular';
     } else if (template === 4) {
-      const start = choice([1, 2]);
+      const start = choice([1, 2, 3]);
       const factorial = (n) => { let x = 1; for (let i = 2; i <= n; i += 1) x *= i; return x; };
       terms = Array.from({ length: 5 }, (_, i) => factorial(start + i)); next = factorial(start + 5);
       explanation = `These are factorials: ${start}!, ${start + 1}!, … . The next term is ${start + 5}! = ${next}.`;
       rule = { type: 'factorials', start }; templateId = 'seq-factorials';
     } else {
-      const primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43];
-      const start = randomInt(0, 6);
+      const primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97];
+      const start = randomInt(0, primes.length - 7);
       terms = primes.slice(start, start + 6); next = primes[start + 6];
       explanation = `These are consecutive prime numbers. The next prime after ${terms[5]} is ${next}.`;
       rule = { type: 'primes', startIndex: start }; templateId = 'seq-primes';
@@ -882,8 +920,9 @@
   }
 
   function digitSequence() {
-    const seed = choice([12, 13, 21, 23, 31, 32]);
-    const increment = choice([9, 18]);
+    let seed = randomInt(12, 89);
+    while (seed % 11 === 0 || seed % 10 === 0) seed = randomInt(12, 89);
+    const increment = choice([9, 18, 27]);
     const reverse = (n) => Number(String(n).split('').reverse().join(''));
     const terms = [seed];
     for (let i = 1; i < 6; i += 1) {
@@ -969,48 +1008,90 @@
       prompt: config.prompt, options: mc.options, correctIndex: mc.correctIndex, correctAnswer, correctValue: correct,
       answerStyle: config.displayStyle || 'probability', allowPercent: true,
       explanation: config.explanation, fasterMethod: config.fasterMethod || '', method: config.method,
-      assumptions: config.assumptions, templateId: config.templateId
+      assumptions: config.assumptions, templateId: config.templateId, dedupeKey: config.dedupeKey || ''
     };
   }
 
   function fairCoinExactlyQuestion() {
-    const n = randomInt(3, 7); const k = randomInt(1, n - 1);
+    const n = randomInt(3, 10); const k = randomInt(1, n - 1);
     const numerator = nCr(n, k); const denominator = 2 ** n;
     return probabilityQuestion({ subtype: 'coins', prompt: `A fair coin is flipped ${n} times. What is the probability of exactly ${k} heads?`, correct: rational(numerator, denominator), distractors: [rational(k, n), rational(1, 2 ** n), rational(nCr(n, Math.max(0, k - 1)), denominator)], method: 'Binomial probability', assumptions: 'Flips are independent and the coin is fair.', explanation: `Choose the ${k} head positions in ${nCr(n, k)} ways. Each sequence has probability 1/${denominator}, so the probability is ${nCr(n, k)}/${denominator} = ${formatRational(rational(numerator, denominator), 'fraction')}.`, fasterMethod: `Use C(${n}, ${k}) / 2^${n}.`, templateId: 'prob-fair-coin-exactly' });
   }
 
   function biasedCoinQuestion() {
-    const pNum = choice([1, 2, 3, 4, 6, 7]); const pDen = choice([5, 10]);
-    if (pNum >= pDen) return biasedCoinQuestion();
-    const n = randomInt(3, 5); const k = randomInt(1, n - 1);
+    const p = choice([rational(1, 5), rational(1, 4), rational(3, 10), rational(1, 3), rational(2, 5), rational(3, 5), rational(2, 3), rational(7, 10), rational(3, 4), rational(4, 5)]);
+    const pNum = p.num; const pDen = p.den;
+    const n = randomInt(3, 7); const k = randomInt(1, n - 1);
     const numerator = nCr(n, k) * pNum ** k * (pDen - pNum) ** (n - k);
     const denominator = pDen ** n;
     return probabilityQuestion({ subtype: 'coins', prompt: `A coin lands heads with probability ${pNum}/${pDen}. It is flipped ${n} times independently. What is the probability of exactly ${k} heads?`, correct: rational(numerator, denominator), distractors: [rational(nCr(n, k) * pNum ** k, pDen ** k), rational(pNum ** k * (pDen - pNum) ** (n - k), denominator), rational(k * pNum, n * pDen)], method: 'Binomial probability', assumptions: 'Flips are independent and the head probability is constant.', explanation: `C(${n}, ${k})(${pNum}/${pDen})^${k}(${pDen - pNum}/${pDen})^${n - k} = ${formatRational(rational(numerator, denominator), 'fraction')}.`, templateId: 'prob-biased-coin-exactly' });
   }
 
   function atLeastOneQuestion() {
-    const sides = choice([4, 6, 8, 10]); const rolls = randomInt(2, 4); const targetCount = choice([1, 2]);
+    const sides = choice([4, 6, 8, 10, 12, 20]); const rolls = randomInt(2, 5); const targetCount = randomInt(1, Math.min(3, sides - 1));
     if (targetCount >= sides) return atLeastOneQuestion();
     const noTarget = rational((sides - targetCount) ** rolls, sides ** rolls);
     const result = subR(rational(1, 1), noTarget);
-    return probabilityQuestion({ subtype: 'dice', prompt: `A fair ${sides}-sided die is rolled ${rolls} times. What is the probability of seeing at least one of ${targetCount === 1 ? 'a specified face' : 'two specified faces'}?`, correct: result, distractors: [rational(targetCount * rolls, sides), noTarget, rational(targetCount ** rolls, sides ** rolls)], method: 'Complement counting', assumptions: `Rolls are independent; each of the ${sides} faces is equally likely.`, explanation: `The probability of avoiding the target ${targetCount === 1 ? 'face' : 'faces'} on every roll is ((${sides - targetCount}/${sides})^${rolls}). Subtract from 1 to get ${formatRational(result, 'fraction')}.`, fasterMethod: 'For “at least one,” calculate 1 minus the probability of none.', templateId: 'prob-at-least-one' });
+    return probabilityQuestion({ subtype: 'dice', prompt: `A fair ${sides}-sided die is rolled ${rolls} times. What is the probability of seeing at least one of ${targetCount === 1 ? 'a specified face' : `${targetCount} specified faces`}?`, correct: result, distractors: [rational(targetCount * rolls, sides), noTarget, rational(targetCount ** rolls, sides ** rolls)], method: 'Complement counting', assumptions: `Rolls are independent; each of the ${sides} faces is equally likely.`, explanation: `The probability of avoiding the target ${targetCount === 1 ? 'face' : 'faces'} on every roll is ((${sides - targetCount}/${sides})^${rolls}). Subtract from 1 to get ${formatRational(result, 'fraction')}.`, fasterMethod: 'For “at least one,” calculate 1 minus the probability of none.', templateId: 'prob-at-least-one' });
   }
 
   function twoDiceSumQuestion() {
-    const target = randomInt(4, 10);
-    const ways = target <= 7 ? target - 1 : 13 - target;
-    return probabilityQuestion({ subtype: 'dice', prompt: `Two fair six-sided dice are rolled. What is the probability that their total is ${target}?`, correct: rational(ways, 36), distractors: [rational(1, 6), rational(target, 36), rational(6 - ways, 36)], method: 'Enumeration', assumptions: 'The two dice are independent and all 36 ordered outcomes are equally likely.', explanation: `There are ${ways} ordered pairs summing to ${target} out of 36 equally likely outcomes, so the probability is ${formatRational(rational(ways, 36), 'fraction')}.`, fasterMethod: 'For sums up to 7, the number of ordered pairs is total − 1; after 7 it decreases symmetrically.', templateId: 'prob-two-dice-sum' });
+    const sides = choice([4, 6, 8, 10]);
+    const target = randomInt(3, 2 * sides - 1);
+    const ways = target <= sides + 1 ? target - 1 : 2 * sides + 1 - target;
+    const totalOutcomes = sides ** 2;
+    return probabilityQuestion({ subtype: 'dice', prompt: `Two fair ${sides}-sided dice numbered 1 to ${sides} are rolled. What is the probability that their total is ${target}?`, correct: rational(ways, totalOutcomes), distractors: [rational(1, sides), rational(target, totalOutcomes), rational(Math.max(1, sides - ways), totalOutcomes)], method: 'Enumeration', assumptions: `The dice are independent and all ${totalOutcomes} ordered outcomes are equally likely.`, explanation: `There are ${ways} ordered pairs summing to ${target} out of ${totalOutcomes} equally likely outcomes, so the probability is ${formatRational(rational(ways, totalOutcomes), 'fraction')}.`, fasterMethod: `For two ${sides}-sided dice, the number of ways rises by one up to a total of ${sides + 1}, then falls symmetrically.`, templateId: 'prob-two-dice-sum' });
   }
 
   function diceConditionalQuestion() {
-    const evenPairs = [];
+    const sides = choice([6, 8]);
+    const variant = randomInt(1, 4);
+    let condition;
+    let success;
+    let conditionText;
+    let successText;
+    if (variant === 1) {
+      condition = (a, b) => (a + b) % 2 === 0;
+      success = (a, b) => a === b;
+      conditionText = 'the total is even';
+      successText = 'the dice show the same number';
+    } else if (variant === 2) {
+      const threshold = randomInt(sides, sides + 3);
+      condition = (a, b) => a + b >= threshold;
+      success = (a, b) => a === b;
+      conditionText = `the total is at least ${threshold}`;
+      successText = 'the dice show the same number';
+    } else if (variant === 3) {
+      const shown = randomInt(2, sides - 1);
+      const threshold = shown + randomInt(3, sides);
+      condition = (a, b) => a === shown || b === shown;
+      success = (a, b) => a + b >= threshold;
+      conditionText = `at least one die shows ${shown}`;
+      successText = `the total is at least ${threshold}`;
+    } else {
+      const threshold = randomInt(sides, sides + 2);
+      condition = (a) => a % 2 === 0;
+      success = (a, b) => a + b >= threshold;
+      conditionText = 'the first die is even';
+      successText = `the total is at least ${threshold}`;
+    }
+    const conditioned = [];
     const qualifying = [];
-    for (let a = 1; a <= 6; a += 1) for (let b = 1; b <= 6; b += 1) if ((a + b) % 2 === 0) { evenPairs.push([a, b]); if (a === b) qualifying.push([a, b]); }
-    return probabilityQuestion({ subtype: 'conditional', prompt: 'Two fair six-sided dice are rolled. Given that the total is even, what is the probability the dice show the same number?', correct: rational(qualifying.length, evenPairs.length), distractors: [rational(6, 36), rational(1, 6), rational(3, 36)], method: 'Conditional probability by enumeration', assumptions: 'The dice are independent; condition only on outcomes with an even total.', explanation: `There are ${evenPairs.length} ordered outcomes with an even total. ${qualifying.length} of them are doubles, so the conditional probability is ${qualifying.length}/${evenPairs.length} = ${formatRational(rational(qualifying.length, evenPairs.length), 'fraction')}.`, fasterMethod: 'Restrict the sample space to the outcomes satisfying the condition before counting successes.', templateId: 'prob-conditional-dice' });
+    for (let a = 1; a <= sides; a += 1) {
+      for (let b = 1; b <= sides; b += 1) {
+        if (condition(a, b)) {
+          conditioned.push([a, b]);
+          if (success(a, b)) qualifying.push([a, b]);
+        }
+      }
+    }
+    if (!conditioned.length || !qualifying.length || qualifying.length === conditioned.length) return diceConditionalQuestion();
+    const correct = rational(qualifying.length, conditioned.length);
+    return probabilityQuestion({ subtype: 'conditional', prompt: `Two fair ${sides}-sided dice numbered 1 to ${sides} are rolled. Given that ${conditionText}, what is the probability that ${successText}?`, correct, distractors: [rational(qualifying.length, sides ** 2), rational(conditioned.length, sides ** 2), rational(Math.max(1, qualifying.length - 1), conditioned.length)], method: 'Conditional probability by enumeration', assumptions: `The dice are independent; condition only on the ${conditioned.length} ordered outcomes satisfying the given information.`, explanation: `After conditioning, ${conditioned.length} ordered outcomes remain. ${qualifying.length} satisfy the required event, so the probability is ${qualifying.length}/${conditioned.length} = ${formatRational(correct, 'fraction')}.`, fasterMethod: 'Restrict the sample space to outcomes satisfying the condition, then count successes inside that smaller space.', templateId: 'prob-conditional-dice' });
   }
 
   function ballsWithoutReplacementQuestion() {
-    const red = randomInt(3, 7); const blue = randomInt(3, 8); const total = red + blue;
+    const red = randomInt(3, 10); const blue = randomInt(3, 11); const total = red + blue;
     const bothRed = Math.random() < 0.5;
     const correct = bothRed ? rational(red * (red - 1), total * (total - 1)) : rational(2 * red * blue, total * (total - 1));
     const prompt = `A bag contains ${red} red and ${blue} blue balls. Two balls are drawn without replacement. What is the probability ${bothRed ? 'both are red' : 'one is red and one is blue'}?`;
@@ -1021,7 +1102,7 @@
   }
 
   function ballsWithReplacementQuestion() {
-    const red = randomInt(2, 6); const blue = randomInt(3, 8); const total = red + blue; const draws = randomInt(2, 4); const k = randomInt(1, draws - 1);
+    const red = randomInt(2, 9); const blue = randomInt(3, 11); const total = red + blue; const draws = randomInt(2, 5); const k = randomInt(1, draws - 1);
     const numerator = nCr(draws, k) * red ** k * blue ** (draws - k);
     const denominator = total ** draws;
     return probabilityQuestion({ subtype: 'sampling', prompt: `A bag contains ${red} red and ${blue} blue balls. A ball is drawn, replaced, and the bag is mixed; this is repeated ${draws} times. What is the probability of exactly ${k} red draw${k === 1 ? '' : 's'}?`, correct: rational(numerator, denominator), distractors: [rational(red ** k * blue ** (draws - k), denominator), rational(k * red, draws * total), rational(nCr(draws, k) * red ** k, total ** k)], method: 'Binomial probability', assumptions: 'Replacement makes the draws independent with constant red probability.', explanation: `C(${draws}, ${k})(${red}/${total})^${k}(${blue}/${total})^${draws - k} = ${formatRational(rational(numerator, denominator), 'fraction')}.`, templateId: 'prob-balls-with-replacement' });
@@ -1029,31 +1110,53 @@
 
   function cardQuestion() {
     const template = randomInt(1, 3);
+    const rankNames = ['aces', 'twos', 'threes', 'fours', 'fives', 'sixes', 'sevens', 'eights', 'nines', 'tens', 'jacks', 'queens', 'kings'];
     if (template === 1) {
-      const ranks = choice([1, 2, 3, 4]);
-      return probabilityQuestion({ subtype: 'cards', prompt: `One card is drawn uniformly from a standard 52-card deck. What is the probability it has one of ${ranks} specified rank${ranks === 1 ? '' : 's'}?`, correct: rational(4 * ranks, 52), distractors: [rational(ranks, 52), rational(4 + ranks, 52), rational(ranks, 13)], method: 'Direct counting', assumptions: 'A standard deck has 52 cards, four suits, and 13 ranks; no jokers.', explanation: `${ranks} rank${ranks === 1 ? '' : 's'} contain ${4 * ranks} cards, so the probability is ${4 * ranks}/52 = ${formatRational(rational(4 * ranks, 52), 'fraction')}.`, templateId: 'prob-card-specified-ranks' });
+      const selectedRanks = sampleDistinct(rankNames, randomInt(1, 4));
+      const rankText = selectedRanks.length === 1
+        ? selectedRanks[0]
+        : `${selectedRanks.slice(0, -1).join(', ')} or ${selectedRanks[selectedRanks.length - 1]}`;
+      const ranks = selectedRanks.length;
+      return probabilityQuestion({ subtype: 'cards', prompt: `One card is drawn uniformly from a standard 52-card deck. What is the probability it is ${rankText}?`, correct: rational(4 * ranks, 52), distractors: [rational(ranks, 52), rational(4 + ranks, 52), rational(ranks, 13)], method: 'Direct counting', assumptions: 'A standard deck has 52 cards, four suits, and 13 ranks; no jokers.', explanation: `${ranks} selected rank${ranks === 1 ? '' : 's'} contain ${4 * ranks} cards, so the probability is ${4 * ranks}/52 = ${formatRational(rational(4 * ranks, 52), 'fraction')}.`, templateId: 'prob-card-specified-ranks' });
     }
     if (template === 2) {
-      const correct = rational(12 * 11, 52 * 51);
-      return probabilityQuestion({ subtype: 'cards', prompt: 'Two cards are drawn from a standard 52-card deck without replacement. What is the probability both are face cards?', correct, distractors: [rational(12 * 12, 52 * 52), rational(12, 52), rational(nCr(12, 2), nCr(52, 2) * 2)], method: 'Sequential probability without replacement', assumptions: 'Face cards are jacks, queens, and kings: 12 cards total; no jokers.', explanation: `P = 12/52 × 11/51 = ${formatRational(correct, 'fraction')}.`, templateId: 'prob-two-face-cards' });
+      const group = choice([
+        { label: 'face cards', count: 12 },
+        { label: 'hearts', count: 13 },
+        { label: 'diamonds', count: 13 },
+        { label: 'clubs', count: 13 },
+        { label: 'spades', count: 13 },
+        { label: 'red cards', count: 26 },
+        { label: 'black cards', count: 26 },
+        { label: 'aces', count: 4 },
+        { label: 'number cards from 2 through 10', count: 36 }
+      ]);
+      const correct = rational(group.count * (group.count - 1), 52 * 51);
+      return probabilityQuestion({ subtype: 'cards', prompt: `Two cards are drawn from a standard 52-card deck without replacement. What is the probability both are ${group.label}?`, correct, distractors: [rational(group.count ** 2, 52 ** 2), rational(group.count, 52), rational(nCr(group.count, 2), nCr(52, 2) * 2)], method: 'Sequential probability without replacement', assumptions: `The deck is standard with no jokers; there are ${group.count} ${group.label}.`, explanation: `P = ${group.count}/52 × ${group.count - 1}/51 = ${formatRational(correct, 'fraction')}.`, templateId: 'prob-two-card-category' });
     }
-    const totalHands = nCr(52, 5);
-    const correct = rational(nCr(4, 2) * nCr(48, 3), totalHands);
-    const withReplacementApproximation = rational(nCr(5, 2) * 4 ** 2 * 48 ** 3, 52 ** 5);
-    const allowsExtraAces = rational(nCr(4, 2) * nCr(50, 3), totalHands);
-    const atLeastTwo = rational(
-      nCr(4, 2) * nCr(48, 3) + nCr(4, 3) * nCr(48, 2) + nCr(4, 4) * nCr(48, 1),
-      totalHands
-    );
-    return probabilityQuestion({ subtype: 'cards', prompt: 'A five-card hand is dealt uniformly from a standard 52-card deck. What is the probability it contains exactly two aces?', correct, distractors: [withReplacementApproximation, allowsExtraAces, atLeastTwo], method: 'Combinations', assumptions: 'Cards are dealt without replacement; order within the hand does not matter; no jokers.', explanation: `Choose 2 of the 4 aces and 3 of the 48 non-aces: C(4,2)C(48,3)/C(52,5) = ${formatRational(correct, 'fraction')}.`, templateId: 'prob-exactly-two-aces' });
+    const rank = choice(rankNames);
+    const rankDisplay = exact => exact === 1 ? (rank === 'sixes' ? 'six' : rank === 'jacks' ? 'jack' : rank === 'queens' ? 'queen' : rank === 'kings' ? 'king' : rank === 'aces' ? 'ace' : rank.endsWith('s') ? rank.slice(0, -1) : rank) : rank;
+    const handSize = randomInt(4, 7);
+    const exact = randomInt(1, Math.min(3, handSize - 1));
+    const totalHands = nCr(52, handSize);
+    const correct = rational(nCr(4, exact) * nCr(48, handSize - exact), totalHands);
+    const withReplacementApproximation = rational(nCr(handSize, exact) * 4 ** exact * 48 ** (handSize - exact), 52 ** handSize);
+    const allowsExtraRanks = rational(nCr(4, exact) * nCr(52 - exact, handSize - exact), totalHands);
+    let atLeast = 0;
+    for (let j = exact; j <= Math.min(4, handSize); j += 1) atLeast += nCr(4, j) * nCr(48, handSize - j);
+    const atLeastExact = rational(atLeast, totalHands);
+    return probabilityQuestion({ subtype: 'cards', prompt: `A ${handSize}-card hand is dealt uniformly from a standard 52-card deck. What is the probability it contains exactly ${exact} ${rankDisplay(exact)}?`, correct, distractors: [withReplacementApproximation, allowsExtraRanks, atLeastExact], method: 'Combinations', assumptions: 'Cards are dealt without replacement; order within the hand does not matter; no jokers.', explanation: `Choose ${exact} of the 4 ${rank} and ${handSize - exact} of the 48 other cards: C(4,${exact})C(48,${handSize - exact})/C(52,${handSize}) = ${formatRational(correct, 'fraction')}.`, templateId: 'prob-exact-rank-in-hand' });
   }
 
   function bayesCoinQuestion() {
-    return probabilityQuestion({ subtype: 'conditional', prompt: 'One coin is fair and one has heads on both sides. A coin is selected uniformly at random and flipped once; it shows heads. What is the probability the selected coin is the double-headed coin?', correct: rational(2, 3), distractors: [rational(1, 2), rational(3, 4), rational(1, 3)], method: 'Bayes’ theorem', assumptions: 'Each coin is equally likely to be selected; the fair coin has head probability 1/2.', explanation: `P(double-headed | H) = (1 × 1/2) / [(1 × 1/2) + (1/2 × 1/2)] = 2/3.`, fasterMethod: 'Among the three equally weighted ways to observe heads—two from the double-headed coin and one from the fair coin—two use the double-headed coin.', templateId: 'prob-bayes-coins' });
+    const fairCoins = randomInt(1, 5);
+    const doubleHeadedCoins = randomInt(1, 4);
+    const correct = rational(2 * doubleHeadedCoins, 2 * doubleHeadedCoins + fairCoins);
+    return probabilityQuestion({ subtype: 'conditional', prompt: `A bag contains ${fairCoins} fair coin${fairCoins === 1 ? '' : 's'} and ${doubleHeadedCoins} double-headed coin${doubleHeadedCoins === 1 ? '' : 's'}. One coin is selected uniformly at random and flipped once; it shows heads. What is the probability the selected coin is double-headed?`, correct, distractors: [rational(doubleHeadedCoins, fairCoins + doubleHeadedCoins), rational(1, 2), rational(doubleHeadedCoins, 2 * doubleHeadedCoins + fairCoins)], method: 'Bayes’ theorem', assumptions: 'Each coin in the bag is equally likely to be selected; a fair coin has head probability 1/2 and a double-headed coin has head probability 1.', explanation: `Weight each possible selected coin by its chance of producing heads. Double-headed coins contribute ${doubleHeadedCoins}; fair coins contribute ${fairCoins}/2, so P(double-headed | H) = ${doubleHeadedCoins}/(${doubleHeadedCoins} + ${fairCoins}/2) = ${formatRational(correct, 'fraction')}.`, fasterMethod: 'Count each double-headed coin as two head-producing half-units and each fair coin as one.', templateId: 'prob-bayes-coins' });
   }
 
   function bayesTestQuestion() {
-    const prevalence = choice([1, 2, 5]); const sensitivity = choice([80, 90, 95]); const falsePositive = choice([5, 10]);
+    const prevalence = choice([1, 2, 3, 4, 5, 8, 10]); const sensitivity = choice([80, 85, 90, 95, 98]); const falsePositive = choice([1, 2, 5, 8, 10, 15]);
     const numerator = prevalence * sensitivity;
     const denominator = prevalence * sensitivity + (100 - prevalence) * falsePositive;
     const correct = rational(numerator, denominator);
@@ -1063,27 +1166,27 @@
   function expectedValueQuestion() {
     const template = randomInt(1, 4);
     if (template === 1) {
-      const win = choice([8, 10, 12, 20]); const p = choice([20, 25, 30, 40]); const cost = choice([2, 3, 4, 5]);
+      const win = choice([6, 8, 10, 12, 15, 18, 20, 24, 30]); const p = choice([15, 20, 25, 30, 35, 40, 50, 60]); const cost = choice([1, 2, 3, 4, 5, 6, 8]);
       const evPayout = rational(win * p, 100); const profit = subR(evPayout, rational(cost, 1));
       return probabilityQuestion({ subtype: 'ev', prompt: `A game pays £${win} with probability ${p / 100} and £0 otherwise. It costs £${cost} to play. What is the expected profit per play?`, correct: profit, distractors: [evPayout, rational(win - cost, 1), subR(rational(cost, 1), evPayout)], displayStyle: 'currency', method: 'Expected value', assumptions: 'The entry cost is paid every play and there are no other outcomes.', explanation: `Expected payout = ${p / 100} × £${win} = ${formatRational(evPayout, 'currency')}. Subtract the £${cost} cost: expected profit = ${formatRational(profit, 'currency')}.`, templateId: 'prob-expected-profit' });
     }
     if (template === 2) {
-      const high = choice([10, 15, 20, 30]); const low = choice([0, 2, 5]); const p = choice([20, 30, 40, 50, 60]);
+      const high = choice([8, 10, 12, 15, 18, 20, 24, 30, 40]); const low = choice([0, 1, 2, 3, 5, 6, 8]); const p = choice([15, 20, 25, 30, 35, 40, 50, 60, 70, 75]);
       const fair = addR(rational(high * p, 100), rational(low * (100 - p), 100));
       return probabilityQuestion({ subtype: 'ev', prompt: `A ticket pays £${high} with probability ${p / 100} and £${low} otherwise. What is its fair entry price?`, correct: fair, distractors: [rational(high * p, 100), rational((high + low), 2), rational(high - low, 1)], displayStyle: 'currency', method: 'Expected value / fair price', assumptions: 'Risk neutrality and no fees; a fair price gives zero expected profit.', explanation: `Fair price = ${p / 100} × £${high} + ${(100 - p) / 100} × £${low} = ${formatRational(fair, 'currency')}.`, templateId: 'prob-fair-price' });
     }
     if (template === 3) {
-      const p = choice([20, 25, 30, 40]); const win = choice([3, 4, 5, 6]); const lose = choice([1, 2, 3]);
+      const p = choice([15, 20, 25, 30, 35, 40, 45, 50, 60]); const win = choice([2, 3, 4, 5, 6, 8, 10]); const lose = choice([1, 2, 3, 4, 5]);
       const ev = subR(rational(p * win, 100), rational((100 - p) * lose, 100));
       return probabilityQuestion({ subtype: 'ev', prompt: `A bet wins £${win} with probability ${p / 100} and loses £${lose} otherwise. What is the expected profit?`, correct: ev, distractors: [rational(p * win, 100), rational(win - lose, 1), rational((100 - p) * lose, 100)], displayStyle: 'currency', method: 'Expected value', assumptions: 'The listed outcomes are exhaustive and mutually exclusive.', explanation: `EV = ${p / 100} × £${win} − ${(100 - p) / 100} × £${lose} = ${formatRational(ev, 'currency')}.`, templateId: 'prob-simple-bet-ev' });
     }
-    const flips = randomInt(4, 10); const reward = choice([1, 2, 3]);
+    const flips = randomInt(4, 16); const reward = choice([1, 2, 3, 4, 5]);
     const ev = rational(flips * reward, 2);
     return probabilityQuestion({ subtype: 'ev', prompt: `A fair coin is flipped ${flips} times. You receive £${reward} for each head. What is the expected total payout?`, correct: ev, distractors: [rational(flips * reward, 1), rational(reward, 2), rational(flips, 2)], displayStyle: 'currency', method: 'Linearity of expectation', assumptions: 'Each flip is fair; rewards add across flips.', explanation: `The expected number of heads is ${flips} × 1/2 = ${flips / 2}. Multiply by £${reward}: expected payout = ${formatRational(ev, 'currency')}.`, fasterMethod: 'Use linearity of expectation; no binomial expansion is needed.', templateId: 'prob-linearity-heads-payout' });
   }
 
   function combinationsQuestion() {
-    const n = randomInt(7, 12); const k = randomInt(2, Math.min(5, n - 2));
+    const n = randomInt(7, 18); const k = randomInt(2, Math.min(7, n - 2));
     const result = rational(nCr(n, k), 1);
     return makeNumericQuestion({ category: 'probability', subtype: 'cards', subtypeLabel: PROBABILITY_SUBTYPES.cards, prompt: `How many distinct committees of ${k} people can be chosen from ${n} people?`, correct: result, style: 'auto', distractors: [rational(n ** k, 1), rational(nCr(n, k) * k, 1), rational(n * k, 1)], explanation: `Order does not matter, so use C(${n}, ${k}) = ${nCr(n, k)}.`, fasterMethod: `Use combinations, not permutations.`, method: 'Combinations', assumptions: 'Each committee is an unordered subset and no person can be selected twice.', templateId: 'prob-basic-combinations' });
   }
@@ -1152,7 +1255,7 @@
     const factorial = (n) => { let value = 1; for (let i = 2; i <= n; i += 1) value *= i; return value; };
     const triangle = (n) => n * (n + 1) / 2;
     const reverse = (n) => Number(String(n).split('').reverse().join(''));
-    const primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43];
+    const primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97];
 
     if (rule.type === 'constantDifference') {
       generated = Array.from({ length: expectedLength + 1 }, (_, i) => rule.start + i * rule.difference);
@@ -1170,8 +1273,10 @@
       });
     } else if (rule.type === 'geometric') {
       const ratioParts = String(rule.ratio).split('/').map(Number);
-      const ratio = ratioParts.length === 2 ? ratioParts[0] / ratioParts[1] : Number(rule.ratio);
-      generated = Array.from({ length: expectedLength + 1 }, (_, i) => rule.start * ratio ** i);
+      const ratioNum = ratioParts.length === 2 ? ratioParts[0] : Number(rule.ratio);
+      const ratioDen = ratioParts.length === 2 ? ratioParts[1] : 1;
+      generated = [rule.start];
+      while (generated.length < expectedLength + 1) generated.push(generated[generated.length - 1] * ratioNum / ratioDen);
     } else if (rule.type === 'alternatingAddSubtract') {
       generated = [rule.start];
       while (generated.length < expectedLength + 1) {
@@ -1304,7 +1409,7 @@
       try {
         const question = generator();
         const errors = validateQuestion(question);
-        const key = question.prompt.replace(/\s+/g, ' ').trim().toLowerCase();
+        const key = questionUniquenessKey(question);
         if (!errors.length && !prompts.has(key)) {
           prompts.add(key);
           questions.push(question);
@@ -1325,7 +1430,7 @@
         attempts += 1;
         try {
           const question = generator();
-          const key = question.prompt.replace(/\s+/g, ' ').trim().toLowerCase();
+          const key = questionUniquenessKey(question);
           if (!validateQuestion(question).length && !prompts.has(key)) {
             prompts.add(key);
             questions.push(question);
