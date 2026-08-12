@@ -621,9 +621,21 @@
       }
       return;
     }
-    if (practiceState && !practiceState.answered && !elements.practice.hidden && practiceState.question.category !== 'mental' && /^[1-4]$/.test(event.key)) {
-      event.preventDefault();
-      submitPracticeChoice(Number(event.key) - 1);
+    if (practiceState && !elements.practice.hidden) {
+      if (practiceState.answered && event.key === 'Enter') {
+        event.preventDefault();
+        nextPracticeQuestion();
+        return;
+      }
+    
+      if (
+        !practiceState.answered &&
+        practiceState.question.category !== 'mental' &&
+        /^[1-4]$/.test(event.key)
+      ) {
+        event.preventDefault();
+        submitPracticeChoice(Number(event.key) - 1);
+      }
     }
   });
 
