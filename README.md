@@ -4,9 +4,7 @@ Quant OA Trainer is a browser-based tool for practising mental math, numerical s
 
 It is intended as a personal training tool rather than a course, commercial platform, or copy of any particular firm's current assessment.
 
-## Live Demo
-
-**[Open Quant OA Trainer](https://williamtdavies.github.io/quant-oa-trainer/)**
+Live Demo: **[Open Quant OA Trainer](https://williamtdavies.github.io/quant-oa-trainer/)**
 
 ## Main modes
 
