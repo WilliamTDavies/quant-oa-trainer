@@ -570,7 +570,7 @@
       <p><strong>Question time:</strong> ${elapsed.toFixed(1)}s</p>`;
       elements.practiceFeedback.hidden = false;
       elements.nextPractice.hidden = false;
-      elements.nextPractice.focus({ preventScroll: true });
+      elements.practiceFeedback.focus({ preventScroll: true });
   }
 
   function openClearModal() {
@@ -629,6 +629,12 @@ document.addEventListener('keydown', (event) => {
   }
 
 if (practiceState && !elements.practice.hidden) {
+  if (practiceState.answered && event.code === 'Space') {
+    event.preventDefault();
+    nextPracticeQuestion();
+    return;
+  }
+
   if (
     !practiceState.answered &&
     practiceState.question.category !== 'mental' &&
