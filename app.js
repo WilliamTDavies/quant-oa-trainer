@@ -568,9 +568,9 @@
       <p><strong>${escapeHtml(question.method || 'Explanation')}:</strong> ${escapeHtml(question.explanation)}</p>
       ${assumptions}${faster}
       <p><strong>Question time:</strong> ${elapsed.toFixed(1)}s</p>`;
-    elements.practiceFeedback.hidden = false;
-    elements.nextPractice.hidden = false;
-    elements.practiceFeedback.focus({ preventScroll: true });
+      elements.practiceFeedback.hidden = false;
+      elements.nextPractice.hidden = false;
+      elements.nextPractice.focus({ preventScroll: true });
   }
 
   function openClearModal() {
@@ -628,36 +628,16 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
-  if (practiceState && !elements.practice.hidden) {
-    const target = event.target;
-
-    const enterIsAnswerAction =
-      event.key === 'Enter' &&
-      (
-        elements.practiceForm.contains(target) ||
-        (target instanceof Element &&
-          Boolean(target.closest('[data-practice-answer]')))
-      );
-
-    if (enterIsAnswerAction) {
-      return;
-    }
-    
-    if (practiceState.answered && event.key === 'Enter') {
-      event.preventDefault();
-      nextPracticeQuestion();
-      return;
-    }
-
-    if (
-      !practiceState.answered &&
-      practiceState.question.category !== 'mental' &&
-      /^[1-4]$/.test(event.key)
-    ) {
-      event.preventDefault();
-      submitPracticeChoice(Number(event.key) - 1);
-    }
+if (practiceState && !elements.practice.hidden) {
+  if (
+    !practiceState.answered &&
+    practiceState.question.category !== 'mental' &&
+    /^[1-4]$/.test(event.key)
+  ) {
+    event.preventDefault();
+    submitPracticeChoice(Number(event.key) - 1);
   }
+}
 });
 
   elements.reviewMistakes.addEventListener('click', () => renderReview('mistakes'));
