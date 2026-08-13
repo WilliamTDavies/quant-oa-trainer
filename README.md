@@ -18,7 +18,7 @@ Live Demo: **[Open Quant OA Trainer](https://williamtdavies.github.io/quant-oa-t
 * Procedurally generated questions with validation
 * Four-option multiple choice for timed drills
 * Typed answers for untimed mental-math practice
-* Keyboard controls (`1`–`4` to answer multiple-choice questions, `Enter` to continue after practice feedback, and `Escape` to skip timed questions)
+* Keyboard controls (`1`–`4` to answer multiple-choice questions, `Space` to continue after practice feedback, and `Escape` to skip timed questions)
 * Overall countdown and per-question timing
 * Delayed feedback during timed drills
 * Immediate feedback during practice
